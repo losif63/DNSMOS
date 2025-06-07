@@ -47,12 +47,19 @@ class ComputeScore:
 
         return sig_poly, bak_poly, ovr_poly
 
-    def __call__(self, fpath, sampling_rate, is_personalized_MOS, separate_hops):
+    def __call__(self, fpath, sampling_rate, is_personalized_MOS, separate_hops, channel):
         aud, input_fs = sf.read(fpath)
         fs = sampling_rate
         if aud.ndim > 1:
             prev_shape = aud.shape
-            aud = np.mean(aud, axis=1)
+            if channel == "mean":
+                aud = np.mean(aud, axis=1)
+            elif channel == "0":
+                aud = aud[:, 0]
+            elif channel == "1":
+                aud = aud[:, 1]
+            else:
+                raise NotImplementedError
             print(f"Converted stereo audio to mono: {prev_shape} => {aud.shape}")
         if input_fs != fs:
             audio = librosa.resample(aud, input_fs, fs)
@@ -74,7 +81,7 @@ class ComputeScore:
         predicted_p808_mos = []
 
         buffer_size = int(INPUT_LENGTH * SAMPLING_RATE)
-        for idx in range(num_hops):
+        for idx in tqdm(range(num_hops)):
             audio_seg = audio[int(idx*hop_len_samples) : int(idx*hop_len_samples) + buffer_size]
 
             input_features = np.array(audio_seg).astype('float32')[np.newaxis,:]
@@ -141,7 +148,7 @@ def main(args):
     clips = glob.glob(os.path.join(args.testset_dir, "*.wav"))
     is_personalized_eval = args.personalized_MOS
     desired_fs = SAMPLING_RATE
-    for m in tqdm(models):
+    for m in models:
         max_recursion_depth = 10
         audio_path = os.path.join(args.testset_dir, m)
         audio_clips_list = glob.glob(os.path.join(audio_path, "*.wav"))
@@ -153,7 +160,7 @@ def main(args):
 
     view_separate = True
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        future_to_url = {executor.submit(compute_score, clip, desired_fs, is_personalized_eval, view_separate): clip for clip in clips}
+        future_to_url = {executor.submit(compute_score, clip, desired_fs, is_personalized_eval, view_separate, "0"): clip for clip in clips}
         for future in tqdm(concurrent.futures.as_completed(future_to_url)):
             clip = future_to_url[future]
             try:
