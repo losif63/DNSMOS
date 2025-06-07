@@ -15,6 +15,7 @@ import pandas as pd
 import soundfile as sf
 from requests import session
 from tqdm import tqdm
+from tqdm.utils import IS_NIX
 
 SAMPLING_RATE = 16000
 INPUT_LENGTH = 9.01
@@ -62,7 +63,7 @@ class ComputeScore:
         while len(audio) < len_samples:
             audio = np.append(audio, audio)
         
-        num_hops = int(np.floor(len(audio)/fs) - INPUT_LENGTH)+1
+        num_hops = int(np.floor(len(audio)/fs - INPUT_LENGTH))+1
         hop_len_samples = fs
         predicted_mos_sig_seg_raw = []
         predicted_mos_bak_seg_raw = []
@@ -72,10 +73,9 @@ class ComputeScore:
         predicted_mos_ovr_seg = []
         predicted_p808_mos = []
 
+        buffer_size = int(INPUT_LENGTH * SAMPLING_RATE)
         for idx in range(num_hops):
-            audio_seg = audio[int(idx*hop_len_samples) : int((idx+INPUT_LENGTH)*hop_len_samples)]
-            if len(audio_seg) < len_samples:
-                continue
+            audio_seg = audio[int(idx*hop_len_samples) : int(idx*hop_len_samples) + buffer_size]
 
             input_features = np.array(audio_seg).astype('float32')[np.newaxis,:]
             p808_input_features = np.array(self.audio_melspec(audio=audio_seg[:-160])).astype('float32')[np.newaxis, :, :]
@@ -91,12 +91,17 @@ class ComputeScore:
             predicted_mos_bak_seg.append(mos_bak)
             predicted_mos_ovr_seg.append(mos_ovr)
             predicted_p808_mos.append(p808_mos)
-        clip_dict = {'filename': fpath, 'len_in_sec': actual_audio_len/fs, 'sr':fs}
-        clip_dict['num_hops'] = num_hops
+
+
+        num_segs = len(predicted_mos_ovr_seg_raw)
         if separate_hops:
-            clip_dict['hops'] = []
-            for i in range(num_hops):
+            clip_dict = []
+            for i in range(num_segs):
                 temp = {
+                    'filename': fpath, 
+                    'seg_num': i,
+                    'len_in_sec': actual_audio_len/fs, 
+                    'sr':fs,
                     'OVRL_raw': predicted_mos_ovr_seg_raw[i],
                     'SIG_raw': predicted_mos_sig_seg_raw[i],
                     'BAK_raw': predicted_mos_bak_seg_raw[i],
@@ -105,9 +110,11 @@ class ComputeScore:
                     'BAK': predicted_mos_bak_seg[i],
                     'P808_MOS': predicted_p808_mos[i]
                 }
-                clip_dict['hops'].append(temp)
+                clip_dict.append(temp)
             return clip_dict
         else:
+            clip_dict = {'filename': fpath, 'len_in_sec': actual_audio_len/fs, 'sr':fs}
+            clip_dict['num_hops'] = num_hops
             clip_dict['OVRL_raw'] = np.mean(predicted_mos_ovr_seg_raw)
             clip_dict['SIG_raw'] = np.mean(predicted_mos_sig_seg_raw)
             clip_dict['BAK_raw'] = np.mean(predicted_mos_bak_seg_raw)
@@ -144,8 +151,9 @@ def main(args):
             max_recursion_depth -= 1
         clips.extend(audio_clips_list)
 
+    view_separate = True
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        future_to_url = {executor.submit(compute_score, clip, desired_fs, is_personalized_eval): clip for clip in clips}
+        future_to_url = {executor.submit(compute_score, clip, desired_fs, is_personalized_eval, view_separate): clip for clip in clips}
         for future in tqdm(concurrent.futures.as_completed(future_to_url)):
             clip = future_to_url[future]
             try:
@@ -153,7 +161,8 @@ def main(args):
             except Exception as exc:
                 print('%r generated an exception: %s' % (clip, exc))
             else:
-                rows.append(data)            
+                for dat in data:
+                    rows.append(dat)
 
     df = pd.DataFrame(rows)
     if args.csv_path:
