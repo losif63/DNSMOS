@@ -160,7 +160,7 @@ def main(args):
 
     view_separate = True
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        future_to_url = {executor.submit(compute_score, clip, desired_fs, is_personalized_eval, view_separate, "0"): clip for clip in clips}
+        future_to_url = {executor.submit(compute_score, clip, desired_fs, is_personalized_eval, view_separate, args.channel_usage): clip for clip in clips}
         for future in tqdm(concurrent.futures.as_completed(future_to_url)):
             clip = future_to_url[future]
             try:
@@ -185,6 +185,7 @@ if __name__=="__main__":
     parser.add_argument('-o', "--csv_path", default=None, help='Dir to the csv that saves the results')
     parser.add_argument('-p', "--personalized_MOS", action='store_true', 
                         help='Flag to indicate if personalized MOS score is needed or regular')
+    parser.add_argument('-c', '--channel_usage', default="mean", help="which channel to use")
     
     args = parser.parse_args()
 
